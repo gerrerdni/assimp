@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Collector Game</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); overflow: hidden; touch-action: none; }
+        #gameContainer { position: relative; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 20px; left: 20px; z-index: 100; color: white; font-size: 18px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); }
+        #score { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+        #lives { color: #ff6b6b; }
+        #gameOver { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 40px; border-radius: 20px; text-align: center; z-index: 200; display: none; }
+        #gameOver h2 { font-size: 36px; margin-bottom: 20px; color: #ff6b6b; }
+        #restartBtn { background: #4CAF50; color: white; border: none; padding: 15px 30px; font-size: 18px; border-radius: 10px; cursor: pointer; }
+        #mobileControls { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; display: none; }
+        .controlBtn { width: 80px; height: 80px; background: rgba(255,255,255,0.3); border: 2px solid rgba(255,255,255,0.5); border-radius: 50%; color: white; font-size: 24px; margin: 0 10px; cursor: pointer; user-select: none; touch-action: manipulation; }
+        .controlBtn:active { background: rgba(255,255,255,0.5); }
+        #instructions { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 30px; border-radius: 15px; text-align: center; z-index: 150; max-width: 400px; }
+        #startBtn { background: #4CAF50; color: white; border: none; padding: 12px 25px; font-size: 16px; border-radius: 8px; cursor: pointer; margin-top: 15px; }
+        @media (max-width: 768px) { #mobileControls { display: block; } }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div id="score">Score: 0</div>
+            <div id="lives">Lives: 3</div>
+        </div>
+        
+        <div id="instructions">
+            <h3>3D Collector Game</h3>
+            <p>Collect golden gems while avoiding red obstacles!</p>
+            <p><strong>Desktop:</strong> WASD or arrow keys</p>
+            <p><strong>Mobile:</strong> Touch controls below</p>
+            <button id="startBtn">Start Game</button>
+        </div>
+        
+        <div id="gameOver">
+            <h2>Game Over!</h2>
+            <p id="finalScore">Final Score: 0</p>
+            <button id="restartBtn">Play Again</button>
+        </div>
+        
+        <div id="mobileControls">
+            <button class="controlBtn" id="upBtn">↑</button>
+            <div style="text-align: center; margin: 10px 0;">
+                <button class="controlBtn" id="leftBtn">←</button>
+                <button class="controlBtn" id="rightBtn">→</button>
+            </div>
+            <button class="controlBtn" id="downBtn">↓</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        class Game {
+            constructor() {
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x87CEEB);
+                
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.camera.position.set(0, 5, 10);
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.shadowMap.enabled = true;
+                document.getElementById('gameContainer').appendChild(this.renderer.domElement);
+                
+                this.player = null;
+                this.gems = [];
+                this.obstacles = [];
+                this.score = 0;
+                this.lives = 3;
+                this.gameRunning = false;
+                this.keys = {};
+                this.touchControls = {};
+                
+                this.setupLighting();
+                this.createGround();
+                this.createPlayer();
+                this.setupEventListeners();
+                this.showInstructions();
+                this.animate();
+            }
+            
+            setupLighting() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(10, 20, 10);
+                directionalLight.castShadow = true;
+                this.scene.add(directionalLight);
+            }
+            
+            createGround() {
+                const groundGeometry = new THREE.PlaneGeometry(50, 50);
+                const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x90EE90, transparent: true, opacity: 0.8 });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                ground.receiveShadow = true;
+                this.scene.add(ground);
+            }
+            
+            createPlayer() {
+                const geometry = new THREE.SphereGeometry(0.5, 16, 16);
+                const material = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
+                this.player = new THREE.Mesh(geometry, material);
+                this.player.position.set(0, 0.5, 0);
+                this.player.castShadow = true;
+                this.scene.add(this.player);
+            }
+            
+            createGem() {
+                const geometry = new THREE.OctahedronGeometry(0.3);
+                const material = new THREE.MeshLambertMaterial({ color: 0xFFD700, emissive: 0x444400 });
+                const gem = new THREE.Mesh(geometry, material);
+                gem.position.x = (Math.random() - 0.5) * 40;
+                gem.position.z = (Math.random() - 0.5) * 40;
+                gem.position.y = 2 + Math.random() * 3;
+                gem.castShadow = true;
+                this.scene.add(gem);
+                this.gems.push(gem);
+            }
+            
+            createObstacle() {
+                const geometry = new THREE.BoxGeometry(1, 2, 1);
+                const material = new THREE.MeshLambertMaterial({ color: 0xFF4444 });
+                const obstacle = new THREE.Mesh(geometry, material);
+                obstacle.position.x = (Math.random() - 0.5) * 40;
+                obstacle.position.z = (Math.random() - 0.5) * 40;
+                obstacle.position.y = 1;
+                obstacle.castShadow = true;
+                this.scene.add(obstacle);
+                this.obstacles.push(obstacle);
+            }
+            
+            setupEventListeners() {
+                document.addEventListener('keydown', (e) => this.keys[e.code] = true);
+                document.addEventListener('keyup', (e) => this.keys[e.code] = false);
+                
+                ['upBtn', 'downBtn', 'leftBtn', 'rightBtn'].forEach(btnId => {
+                    const btn = document.getElementById(btnId);
+                    btn.addEventListener('touchstart', (e) => { e.preventDefault(); this.touchControls[btnId] = true; });
+                    btn.addEventListener('touchend', (e) => { e.preventDefault(); this.touchControls[btnId] = false; });
+                    btn.addEventListener('mousedown', (e) => { e.preventDefault(); this.touchControls[btnId] = true; });
+                    btn.addEventListener('mouseup', (e) => { e.preventDefault(); this.touchControls[btnId] = false; });
+                });
+                
+                document.getElementById('startBtn').addEventListener('click', () => this.startGame());
+                document.getElementById('restartBtn').addEventListener('click', () => this.restartGame());
+                
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+            
+            showInstructions() {
+                document.getElementById('instructions').style.display = 'block';
+            }
+            
+            startGame() {
+                document.getElementById('instructions').style.display = 'none';
+                this.gameRunning = true;
+                this.score = 0;
+                this.lives = 3;
+                this.updateUI();
+                this.clearObjects();
+                
+                for (let i = 0; i < 5; i++) this.createGem();
+                for (let i = 0; i < 3; i++) this.createObstacle();
+                
+                this.spawnTimer = setInterval(() => {
+                    if (this.gameRunning) {
+                        if (Math.random() < 0.3) this.createGem();
+                        if (Math.random() < 0.2) this.createObstacle();
+                    }
+                }, 2000);
+            }
+            
+            clearObjects() {
+                this.gems.forEach(gem => this.scene.remove(gem));
+                this.obstacles.forEach(obstacle => this.scene.remove(obstacle));
+                this.gems = [];
+                this.obstacles = [];
+            }
+            
+            updatePlayer() {
+                const speed = 0.15;
+                
+                if (this.keys['KeyW'] || this.keys['ArrowUp'] || this.touchControls['upBtn']) this.player.position.z -= speed;
+                if (this.keys['KeyS'] || this.keys['ArrowDown'] || this.touchControls['downBtn']) this.player.position.z += speed;
+                if (this.keys['KeyA'] || this.keys['ArrowLeft'] || this.touchControls['leftBtn']) this.player.position.x -= speed;
+                if (this.keys['KeyD'] || this.keys['ArrowRight'] || this.touchControls['rightBtn']) this.player.position.x += speed;
+                
+                this.player.position.x = Math.max(-20, Math.min(20, this.player.position.x));
+                this.player.position.z = Math.max(-20, Math.min(20, this.player.position.z));
+                
+                this.camera.position.x = this.player.position.x;
+                this.camera.position.z = this.player.position.z + 10;
+                this.camera.lookAt(this.player.position);
+            }
+            
+            checkCollisions() {
+                for (let i = this.gems.length - 1; i >= 0; i--) {
+                    const gem = this.gems[i];
+                    if (this.player.position.distanceTo(gem.position) < 1) {
+                        this.scene.remove(gem);
+                        this.gems.splice(i, 1);
+                        this.score += 10;
+                        this.updateUI();
+                        setTimeout(() => this.createGem(), 1000);
+                    }
+                }
+                
+                for (let i = this.obstacles.length - 1; i >= 0; i--) {
+                    const obstacle = this.obstacles[i];
+                    if (this.player.position.distanceTo(obstacle.position) < 1.5) {
+                        this.lives--;
+                        this.updateUI();
+                        if (this.lives <= 0) {
+                            this.gameOver();
+                        } else {
+                            this.player.position.set(0, 0.5, 0);
+                        }
+                    }
+                }
+            }
+            
+            updateUI() {
+                document.getElementById('score').textContent = `Score: ${this.score}`;
+                document.getElementById('lives').textContent = `Lives: ${this.lives}`;
+            }
+            
+            gameOver() {
+                this.gameRunning = false;
+                clearInterval(this.spawnTimer);
+                document.getElementById('finalScore').textContent = `Final Score: ${this.score}`;
+                document.getElementById('gameOver').style.display = 'block';
+            }
+            
+            restartGame() {
+                document.getElementById('gameOver').style.display = 'none';
+                this.startGame();
+            }
+            
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                if (this.gameRunning) {
+                    this.updatePlayer();
+                    this.checkCollisions();
+                    
+                    this.gems.forEach(gem => {
+                        gem.rotation.y += 0.02;
+                        gem.position.y += Math.sin(Date.now() * 0.003) * 0.01;
+                    });
+                    
+                    this.obstacles.forEach(obstacle => {
+                        obstacle.rotation.y += 0.01;
+                    });
+                }
+                
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+        
+        window.addEventListener('load', () => new Game());
+    </script>
+</body>
+</html>
